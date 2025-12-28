@@ -1,0 +1,21 @@
+{
+  "name": "起点造梦机 - 网文写作助手",
+  "short_name": "起点造梦机",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "description": "专为起点网文作者打造的AI写作助手，提供创意生成、大纲构建及文笔润色功能。",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2232/2232688.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2232/2232688.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
