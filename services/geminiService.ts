@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
-import { Genre, Tone, Idea, Character, Chapter, AnalysisResult } from "../types";
+import { Genre, Tone, Idea, Character, Chapter, AnalysisResult, RankingResult } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -8,8 +8,9 @@ const MODEL_PRO = 'gemini-3-pro-preview';
 
 /**
  * Generates a high-concept web novel idea based on Qidian tropes.
+ * Accepts string for genre and tone to support custom user inputs.
  */
-export const generateNovelIdea = async (genre: Genre, tone: Tone): Promise<Idea> => {
+export const generateNovelIdea = async (genre: string, tone: string): Promise<Idea> => {
   const prompt = `
     你也是起点中文网的白金作家。
     请在 "${genre}" 分类下，以 "${tone}" 的基调，生成一个具有爆款潜质的网文创意。
@@ -46,6 +47,107 @@ export const generateNovelIdea = async (genre: Genre, tone: Tone): Promise<Idea>
 
   if (!response.text) throw new Error("No response from AI");
   return JSON.parse(response.text) as Idea;
+};
+
+/**
+ * Fetches current Qidian rankings using Google Search Grounding and returns structured JSON.
+ */
+export const fetchQidianRankings = async (): Promise<RankingResult> => {
+  const prompt = `
+    请利用 Google Search 搜索“起点中文网”最新的榜单数据（请确保数据尽可能新）。
+    
+    任务：
+    1. 搜集以下 6 个主要榜单：
+       - 月票榜 (Monthly Ticket)
+       - 畅销榜 (Best Sellers)
+       - 阅读指数榜 (Reading Index)
+       - 推荐票榜 (Recommended)
+       - 收藏榜 (Favorites)
+       - 完本榜 (Finished)
+    2. 对于每个榜单，提取前 6 本书。
+    3. 每本书需要提取：排名、书名、作者、类型、热度数值（如月票数）、简介（一句话概括）、核心看点（为什么火？）。
+    4. **关键**：请尽力寻找每本书的封面图片URL (coverUrl)。
+       - 优先寻找起点官网(qidian.com)或百科的图片链接。
+       - 必须是以 http 开头的有效图片链接。
+       - 如果找不到确切图片，请留空，不要编造。
+    5. 对当前的整体流行趋势写一段简短的分析 (trendAnalysis)。
+    
+    输出要求：
+    必须是符合 Schema 的 JSON 格式。
+  `;
+
+  const schema: Schema = {
+    type: Type.OBJECT,
+    properties: {
+      categories: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING, description: "榜单名称，如'月票榜'" },
+            books: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  rank: { type: Type.INTEGER },
+                  title: { type: Type.STRING },
+                  author: { type: Type.STRING },
+                  genre: { type: Type.STRING },
+                  heat: { type: Type.STRING, description: "热度数据，如'12万月票'" },
+                  summary: { type: Type.STRING, description: "简短剧情概括" },
+                  highlights: { type: Type.STRING, description: "核心看点/爽点分析" },
+                  coverUrl: { type: Type.STRING, description: "Optional image URL if found, otherwise empty" }
+                },
+                required: ["rank", "title", "author", "genre", "heat", "summary", "highlights"]
+              }
+            }
+          },
+          required: ["name", "books"]
+        }
+      },
+      trendAnalysis: { type: Type.STRING, description: "当前网文市场流行趋势分析" }
+    },
+    required: ["categories", "trendAnalysis"]
+  };
+
+  const response = await ai.models.generateContent({
+    model: MODEL_FLASH, 
+    contents: prompt,
+    config: {
+      tools: [{ googleSearch: {} }],
+      responseMimeType: "application/json",
+      responseSchema: schema,
+    },
+  });
+
+  const text = response.text || "{}";
+  let parsedData;
+  try {
+    parsedData = JSON.parse(text);
+  } catch (e) {
+    throw new Error("Failed to parse ranking data.");
+  }
+
+  // Extract sources
+  const sources: { title: string; uri: string }[] = [];
+  const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+  if (chunks) {
+    chunks.forEach((chunk: any) => {
+      if (chunk.web?.uri && chunk.web?.title) {
+        sources.push({
+          title: chunk.web.title,
+          uri: chunk.web.uri
+        });
+      }
+    });
+  }
+
+  return {
+    categories: parsedData.categories || [],
+    trendAnalysis: parsedData.trendAnalysis || "暂无趋势分析",
+    sources
+  };
 };
 
 /**
@@ -97,7 +199,7 @@ export const generateOutline = async (idea: Idea, count: number = 5): Promise<Ch
 /**
  * Generates a character profile tailored for web novels, optionally using the outline.
  */
-export const generateCharacter = async (role: string, genre: Genre, outline?: Chapter[]): Promise<Character> => {
+export const generateCharacter = async (role: string, genre: string, outline?: Chapter[]): Promise<Character> => {
   let contextPrompt = "";
   if (outline && outline.length > 0) {
     const outlineStr = outline.map(c => `第${c.number}章 ${c.title}: ${c.summary}`).join('\n');
@@ -148,7 +250,6 @@ export const generateCharacter = async (role: string, genre: Genre, outline?: Ch
 
 /**
  * Editor Helper: Continue text or Polish text.
- * Enhanced to accept structured context.
  */
 export const assistWriting = async (
   currentText: string, 

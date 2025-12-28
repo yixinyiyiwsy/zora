@@ -12,6 +12,8 @@ export enum Tone {
   COMEDY = '轻松/搞笑',
   DARK = '黑暗/杀伐果断',
   TRADITIONAL = '慢热/传统',
+  INTRIGUE = '权谋/智斗',
+  TRAGEDY = '虐主/致郁',
 }
 
 export interface Idea {
@@ -52,6 +54,28 @@ export interface AnalysisResult {
   humanTraits: string[]; // Features that look human
   aiTraits: string[]; // Features that look like AI
   suggestions: SpecificSuggestion[];
+}
+
+export interface RankingBook {
+  rank: number;
+  title: string;
+  author: string;
+  genre: string;
+  heat: string; // e.g. "100万月票"
+  summary: string;
+  highlights: string; // Hook/Why it's popular
+  coverUrl?: string; // Optional
+}
+
+export interface RankingCategory {
+  name: string; // e.g., "月票榜"
+  books: RankingBook[];
+}
+
+export interface RankingResult {
+  categories: RankingCategory[]; 
+  trendAnalysis: string; 
+  sources: { title: string; uri: string }[]; 
 }
 
 export interface GenerationState {

@@ -27,9 +27,14 @@ import {
   Download,
   Trash2,
   Smartphone,
-  Upload
+  Upload,
+  Trophy,
+  ExternalLink,
+  Book,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
-import { Genre, Tone, Idea, Character, Chapter, GenerationState, AnalysisResult, SpecificSuggestion } from './types';
+import { Genre, Tone, Idea, Character, Chapter, GenerationState, AnalysisResult, SpecificSuggestion, RankingResult, RankingBook } from './types';
 import * as geminiService from './services/geminiService';
 import * as storageService from './services/storage';
 
@@ -76,6 +81,102 @@ const LoadingButton = ({ isLoading, onClick, children, icon: Icon, className = "
     {children}
   </button>
 );
+
+// --- Ranking Item Component ---
+const RankingBookCard = ({ book }: { book: RankingBook }) => {
+  const [expanded, setExpanded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  // Helper to get a consistent color gradient based on rank
+  const getRankColor = (rank: number) => {
+    if (rank === 1) return "from-yellow-400 to-orange-500 text-white";
+    if (rank === 2) return "from-slate-300 to-slate-400 text-slate-800";
+    if (rank === 3) return "from-amber-600 to-amber-700 text-amber-100";
+    return "from-slate-700 to-slate-800 text-slate-400";
+  }
+
+  // Generate a deterministic color for fallback cover based on title length
+  const getFallbackColor = () => {
+    const colors = [
+      'bg-emerald-800', 'bg-blue-800', 'bg-indigo-800', 'bg-purple-800', 'bg-rose-800', 'bg-cyan-800'
+    ];
+    return colors[book.title.length % colors.length];
+  }
+
+  return (
+    <div 
+      className={`bg-slate-800 border border-slate-700 rounded-xl overflow-hidden transition-all duration-300 hover:border-indigo-500/50 cursor-pointer group ${expanded ? 'ring-2 ring-indigo-500/30' : ''}`}
+      onClick={() => setExpanded(!expanded)}
+    >
+      <div className="flex">
+        {/* Rank & Cover */}
+        <div className="w-24 h-32 shrink-0 bg-slate-900 relative shadow-md overflow-hidden">
+           {book.coverUrl && !imgError ? (
+               <img 
+                 src={book.coverUrl} 
+                 alt={book.title} 
+                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+                 onError={() => setImgError(true)}
+               />
+           ) : (
+               <div className={`w-full h-full ${getFallbackColor()} flex flex-col items-center justify-center p-2 text-center border-r border-slate-600`}>
+                   <Book size={24} className="text-white/50 mb-2" />
+                   <span className="text-xs font-serif text-white/90 leading-tight font-bold line-clamp-3">
+                     {book.title}
+                   </span>
+               </div>
+           )}
+           
+           {/* Rank Badge */}
+           <div className={`absolute top-0 left-0 px-2 py-1 rounded-br-lg text-xs font-bold shadow-lg bg-gradient-to-r z-20 ${getRankColor(book.rank)}`}>
+             #{book.rank}
+           </div>
+        </div>
+
+        {/* Main Info */}
+        <div className="flex-1 p-3 flex flex-col justify-between h-32">
+           <div className="overflow-hidden">
+             <div className="flex items-start justify-between gap-2 mb-1">
+                <h4 className="font-bold text-white text-lg leading-tight line-clamp-1">{book.title}</h4>
+             </div>
+             <div className="flex items-center gap-2 text-xs text-slate-400 mb-2">
+                <span className="text-slate-200">{book.author}</span>
+                <span className="w-1 h-1 bg-slate-600 rounded-full"></span>
+                <span>{book.genre}</span>
+             </div>
+             <div className="inline-flex items-center gap-1 text-red-400 text-xs font-bold bg-red-900/10 px-2 py-1 rounded border border-red-900/20">
+                <Flame size={12} fill="currentColor" /> {book.heat}
+             </div>
+           </div>
+           
+           <div className="flex items-center justify-between text-xs text-indigo-400 pt-2 border-t border-slate-700/50">
+              <span className="flex items-center gap-1">
+                 {expanded ? '收起详情' : '点击查看简介与看点'}
+              </span>
+              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+           </div>
+        </div>
+      </div>
+
+      {/* Expanded Details */}
+      {expanded && (
+        <div className="bg-slate-900/50 p-4 border-t border-slate-700 space-y-3 animate-fade-in-down">
+           <div>
+             <span className="text-slate-500 text-xs font-bold uppercase mb-1 block">简介</span>
+             <p className="text-slate-300 text-sm leading-relaxed">{book.summary}</p>
+           </div>
+           <div>
+             <span className="text-indigo-400 text-xs font-bold uppercase mb-1 block flex items-center gap-1"><Zap size={12}/> 核心看点</span>
+             <p className="text-indigo-200 text-sm leading-relaxed bg-indigo-900/10 p-2 rounded border border-indigo-500/20">
+               {book.highlights}
+             </p>
+           </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 
 // --- Suggestion Item Component ---
 
@@ -183,7 +284,7 @@ const SuggestionItem = ({
 // --- Main App ---
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'idea' | 'outline' | 'characters' | 'write'>('idea');
+  const [activeTab, setActiveTab] = useState<'idea' | 'outline' | 'characters' | 'write' | 'ranking'>('idea');
   
   // App State
   const [currentIdea, setCurrentIdea] = useState<Idea | null>(null);
@@ -199,19 +300,25 @@ export default function App() {
   const [charState, setCharState] = useState<GenerationState>({ isLoading: false, error: null });
   const [editorState, setEditorState] = useState<GenerationState>({ isLoading: false, error: null });
   const [zhuqueState, setZhuqueState] = useState<{ isLoading: boolean, error: string | null, result: AnalysisResult | null, ignoredIndices: number[] }>({ isLoading: false, error: null, result: null, ignoredIndices: [] });
+  const [rankingState, setRankingState] = useState<{ isLoading: boolean, error: string | null, data: RankingResult | null }>({ isLoading: false, error: null, data: null });
+  
+  // Ranking Tab State
+  const [activeRankingCategory, setActiveRankingCategory] = useState<number>(0);
 
   // Input States
-  const [selectedGenre, setSelectedGenre] = useState<Genre>(Genre.XIANXIA);
-  const [selectedTone, setSelectedTone] = useState<Tone>(Tone.FACE_SLAPPING);
+  const [selectedGenre, setSelectedGenre] = useState<string>(Genre.XIANXIA);
+  const [customGenre, setCustomGenre] = useState<string>("");
+  const [selectedTone, setSelectedTone] = useState<string>(Tone.FACE_SLAPPING);
+  const [customTone, setCustomTone] = useState<string>("");
+  
   const [newCharRole, setNewCharRole] = useState<string>("主角");
-  const [useOutlineForChar, setUseOutlineForChar] = useState<boolean>(true); // New state for outline toggle
+  const [useOutlineForChar, setUseOutlineForChar] = useState<boolean>(true);
 
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Effects (The "Backend" Persistence & PWA) ---
 
-  // Load on mount and PWA Listener
   useEffect(() => {
     // Storage Load
     const saved = storageService.loadProject();
@@ -241,7 +348,7 @@ export default function App() {
   useEffect(() => {
     const timer = setTimeout(() => {
       handleSave(true);
-    }, 5000); // Auto-save every 5 seconds if changed
+    }, 5000); 
 
     return () => clearTimeout(timer);
   }, [currentIdea, outline, characters, editorContent]);
@@ -252,7 +359,6 @@ export default function App() {
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User response to the install prompt: ${outcome}`);
     if (outcome === 'accepted') {
       setDeferredPrompt(null);
     }
@@ -261,9 +367,6 @@ export default function App() {
   const handleSave = (silent = false) => {
     storageService.saveProject(currentIdea, outline, characters, editorContent);
     setLastSaved(new Date().toLocaleTimeString());
-    if (!silent) {
-      // Could show a toast here
-    }
   };
 
   const handleClearProject = () => {
@@ -296,20 +399,30 @@ export default function App() {
       const text = e.target?.result;
       if (typeof text === 'string') {
         if (editorContent.length > 50 && !window.confirm("导入文件将覆盖当前编辑框内容，确定要继续吗？")) {
-           event.target.value = ''; // Reset input
+           event.target.value = ''; 
            return;
         }
         setEditorContent(text);
       }
     };
     reader.readAsText(file);
-    event.target.value = ''; // Reset input to allow re-uploading same file
+    event.target.value = ''; 
   };
 
   const handleGenerateIdea = async () => {
     setIdeaState({ isLoading: true, error: null });
+    
+    // Determine final genre and tone
+    const finalGenre = selectedGenre === 'Custom' ? customGenre : selectedGenre;
+    const finalTone = selectedTone === 'Custom' ? customTone : selectedTone;
+
+    if (!finalGenre || !finalTone) {
+        setIdeaState({ isLoading: false, error: "请填写完整的分类和基调" });
+        return;
+    }
+
     try {
-      const idea = await geminiService.generateNovelIdea(selectedGenre, selectedTone);
+      const idea = await geminiService.generateNovelIdea(finalGenre, finalTone);
       setCurrentIdea(idea);
     } catch (e: any) {
       setIdeaState({ isLoading: false, error: e.message });
@@ -339,7 +452,8 @@ export default function App() {
     try {
       // Pass the outline if the checkbox is checked AND outline exists
       const outlineContext = (useOutlineForChar && outline.length > 0) ? outline : undefined;
-      const char = await geminiService.generateCharacter(newCharRole, selectedGenre, outlineContext);
+      const finalGenre = selectedGenre === 'Custom' ? customGenre : selectedGenre;
+      const char = await geminiService.generateCharacter(newCharRole, finalGenre, outlineContext);
       setCharacters(prev => [...prev, char]);
     } catch (e: any) {
       setCharState({ isLoading: false, error: e.message });
@@ -348,10 +462,20 @@ export default function App() {
     }
   };
 
+  const handleFetchRankings = async () => {
+    setRankingState({ isLoading: true, error: null, data: null });
+    setActiveRankingCategory(0); // Reset tab
+    try {
+      const result = await geminiService.fetchQidianRankings();
+      setRankingState({ isLoading: false, error: null, data: result });
+    } catch (e: any) {
+      setRankingState({ isLoading: false, error: e.message, data: null });
+    }
+  };
+
   const handleEditorAssist = async (type: 'continue' | 'polish' | 'describe') => {
     setEditorState({ isLoading: true, error: null });
     try {
-      // Pass the entire world state to the backend logic
       const contextData = {
         idea: currentIdea,
         characters: characters,
@@ -394,47 +518,12 @@ export default function App() {
     const index = content.indexOf(text);
     
     if (index !== -1) {
-      // 1. Focus and Select
       textarea.focus();
       textarea.setSelectionRange(index, index + text.length);
-
-      // 2. Exact Scroll Calculation using Mirror Div
-      const div = document.createElement('div');
-      const style = window.getComputedStyle(textarea);
-      
-      // Copy styles to ensure matching geometry
-      Array.from(style).forEach((prop) => {
-        div.style.setProperty(prop, style.getPropertyValue(prop));
-      });
-      
-      // Important overrides for precise measurement
-      div.style.position = 'absolute';
-      div.style.visibility = 'hidden';
-      div.style.height = 'auto';
-      div.style.width = `${textarea.clientWidth}px`;
-      div.style.whiteSpace = 'pre-wrap'; // Ensure wrapping matches textarea
-      div.style.overflow = 'hidden';
-      
-      // Content before target
-      div.textContent = content.substring(0, index);
-      
-      // Marker for position
-      const span = document.createElement('span');
-      span.textContent = text;
-      div.appendChild(span);
-      
-      document.body.appendChild(div);
-      
-      // Calculate offset
-      const topOffset = span.offsetTop;
-      const textareaHeight = textarea.clientHeight;
-      
-      // Scroll to center the text
-      // We subtract padding-top (usually in style) but simpler to just center
-      textarea.scrollTop = Math.max(0, topOffset - textareaHeight / 2);
-      
-      document.body.removeChild(div);
-      
+      // Simple scroll calc
+      const lines = content.substring(0, index).split("\n").length;
+      const lineHeight = 28; // approx line height in px
+      textarea.scrollTop = Math.max(0, (lines * lineHeight) - 100);
     } else {
       alert("未在编辑器中找到该片段 (可能已被修改)");
     }
@@ -491,6 +580,12 @@ export default function App() {
             active={activeTab === 'write'} 
             onClick={() => setActiveTab('write')} 
           />
+          <SidebarItem 
+            icon={Trophy} 
+            label="榜单风向" 
+            active={activeTab === 'ranking'} 
+            onClick={() => setActiveTab('ranking')} 
+          />
         </nav>
 
         <div className="mt-auto pt-6 border-t border-slate-800 space-y-4">
@@ -538,13 +633,14 @@ export default function App() {
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
                 <div className="space-y-6">
+                  {/* Genre Selection */}
                   <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50 shadow-xl">
                     <label className="block text-sm font-semibold text-slate-400 mb-2 uppercase tracking-wide">小说分类</label>
                     <div className="grid grid-cols-1 gap-2">
                       {Object.values(Genre).map((g) => (
                         <button
                           key={g}
-                          onClick={() => setSelectedGenre(g)}
+                          onClick={() => { setSelectedGenre(g); setCustomGenre(""); }}
                           className={`text-left px-4 py-3 rounded-lg border transition-all ${
                             selectedGenre === g 
                               ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' 
@@ -554,16 +650,39 @@ export default function App() {
                           {g}
                         </button>
                       ))}
+                      {/* Custom Genre Button */}
+                      <button
+                          onClick={() => setSelectedGenre("Custom")}
+                          className={`text-left px-4 py-3 rounded-lg border transition-all flex items-center gap-2 ${
+                            selectedGenre === "Custom"
+                              ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300' 
+                              : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600'
+                          }`}
+                        >
+                          <PenTool size={16} /> 自定义分类...
+                      </button>
+                      
+                      {selectedGenre === "Custom" && (
+                         <input 
+                           type="text"
+                           value={customGenre}
+                           onChange={(e) => setCustomGenre(e.target.value)}
+                           placeholder="输入自定义分类 (如：赛博修真)..."
+                           className="w-full mt-2 bg-slate-900 text-white px-4 py-2 rounded-lg border border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 animate-fade-in-up"
+                           autoFocus
+                         />
+                      )}
                     </div>
                   </div>
                   
+                  {/* Tone Selection */}
                   <div className="bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50 shadow-xl">
                     <label className="block text-sm font-semibold text-slate-400 mb-2 uppercase tracking-wide">故事基调</label>
                     <div className="flex flex-wrap gap-2">
                       {Object.values(Tone).map((t) => (
                         <button
                           key={t}
-                          onClick={() => setSelectedTone(t)}
+                          onClick={() => { setSelectedTone(t); setCustomTone(""); }}
                           className={`px-3 py-2 rounded-md text-sm transition-all ${
                             selectedTone === t
                               ? 'bg-indigo-600 text-white'
@@ -573,7 +692,27 @@ export default function App() {
                           {t}
                         </button>
                       ))}
+                      <button
+                          onClick={() => setSelectedTone("Custom")}
+                          className={`px-3 py-2 rounded-md text-sm transition-all border border-dashed ${
+                            selectedTone === "Custom"
+                              ? 'bg-indigo-600 text-white border-indigo-400'
+                              : 'bg-transparent text-slate-400 border-slate-600 hover:border-slate-400'
+                          }`}
+                        >
+                          自定义...
+                      </button>
                     </div>
+                    {selectedTone === "Custom" && (
+                       <input 
+                         type="text"
+                         value={customTone}
+                         onChange={(e) => setCustomTone(e.target.value)}
+                         placeholder="输入自定义基调 (如：克苏鲁风)..."
+                         className="w-full mt-3 bg-slate-900 text-white px-4 py-2 rounded-lg border border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 animate-fade-in-up"
+                         autoFocus
+                       />
+                    )}
                   </div>
 
                   <LoadingButton 
@@ -642,6 +781,119 @@ export default function App() {
                 </div>
               </div>
             </div>
+          )}
+          
+          {/* Tab: Ranking / Leaderboard */}
+          {activeTab === 'ranking' && (
+             <div className="animate-fade-in-up h-[calc(100vh-100px)] flex flex-col">
+                <SectionHeader 
+                  title="起点风向标" 
+                  subtitle="实时获取起点中文网最新榜单，把握市场脉搏。" 
+                />
+                
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 flex-1 overflow-hidden">
+                   {/* Left Control Panel */}
+                   <div className="lg:col-span-1 space-y-6 overflow-y-auto pr-2">
+                      <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
+                         <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                            <Trophy className="text-yellow-500" /> 榜单查询
+                         </h3>
+                         <p className="text-slate-400 text-sm mb-6">
+                            AI 将实时联网检索起点中文网的月票榜、畅销榜及阅读指数榜，并为您分析当前的热门题材趋势。
+                         </p>
+                         
+                         <LoadingButton 
+                            isLoading={rankingState.isLoading} 
+                            onClick={handleFetchRankings}
+                            icon={RefreshCcw}
+                            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/25"
+                          >
+                            获取最新榜单
+                          </LoadingButton>
+                          
+                          {rankingState.error && (
+                             <div className="mt-4 p-3 bg-red-900/20 border border-red-900/50 rounded-lg text-red-300 text-xs">
+                                Error: {rankingState.error}
+                             </div>
+                          )}
+                      </div>
+
+                      {rankingState.data?.trendAnalysis && (
+                        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
+                          <h4 className="text-sm font-bold text-indigo-400 uppercase mb-3 flex items-center gap-2">
+                             <TrendingUp size={16} /> 市场趋势分析
+                          </h4>
+                          <p className="text-slate-300 text-sm leading-relaxed">
+                            {rankingState.data.trendAnalysis}
+                          </p>
+                        </div>
+                      )}
+
+                      {rankingState.data?.sources && rankingState.data.sources.length > 0 && (
+                        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700">
+                           <h4 className="text-sm font-bold text-slate-400 uppercase mb-3">数据来源</h4>
+                           <ul className="space-y-2">
+                              {rankingState.data.sources.map((source, idx) => (
+                                <li key={idx} className="truncate">
+                                   <a href={source.uri} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-xs text-indigo-400 hover:underline">
+                                      <ExternalLink size={10} /> {source.title}
+                                   </a>
+                                </li>
+                              ))}
+                           </ul>
+                        </div>
+                      )}
+                   </div>
+
+                   {/* Right Content Panel (Ranking Lists) */}
+                   <div className="lg:col-span-2 flex flex-col h-full overflow-hidden">
+                      {rankingState.data ? (
+                         <div className="flex flex-col h-full bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl relative overflow-hidden">
+                            
+                            {/* Tabs */}
+                            <div className="flex border-b border-slate-700 bg-slate-800/50 p-2 gap-2 overflow-x-auto">
+                               {rankingState.data.categories.map((cat, idx) => (
+                                  <button
+                                    key={idx}
+                                    onClick={() => setActiveRankingCategory(idx)}
+                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
+                                       activeRankingCategory === idx 
+                                       ? 'bg-indigo-600 text-white shadow' 
+                                       : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+                                    }`}
+                                  >
+                                     {cat.name}
+                                  </button>
+                               ))}
+                            </div>
+
+                            {/* List content */}
+                            <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+                               {rankingState.data.categories[activeRankingCategory]?.books.map((book) => (
+                                  <RankingBookCard key={book.rank} book={book} />
+                               ))}
+                            </div>
+
+                         </div>
+                      ) : (
+                         <div className="h-full min-h-[400px] flex flex-col items-center justify-center border-2 border-dashed border-slate-800 rounded-2xl text-slate-500 bg-slate-800/30">
+                            {rankingState.isLoading ? (
+                               <div className="text-center space-y-4">
+                                  <Loader2 size={48} className="animate-spin mx-auto text-indigo-500" />
+                                  <p>正在联网搜索起点最新数据...</p>
+                                  <p className="text-xs text-slate-600">这可能需要几秒钟时间</p>
+                               </div>
+                            ) : (
+                               <div className="text-center">
+                                  <Trophy size={48} className="mx-auto mb-4 opacity-20" />
+                                  <p>点击左侧按钮获取实时榜单。</p>
+                               </div>
+                            )}
+                         </div>
+                      )}
+                   </div>
+                </div>
+             </div>
           )}
 
           {/* Tab: Outline Master */}
